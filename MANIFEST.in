@@ -1,0 +1,16 @@
+# MANIFEST.in
+#
+# This tells distutils what files to distribute.
+
+include LICENSE
+include README.rst
+include MANIFEST.in
+
+# Main
+recursive-include lanscan *.py
+recursive-exclude * .html # from test output
+recursive-exclude * .json # from test output
+recursive-exclude * .gitignore
+recursive-exclude * .travis.yml
+recursive-exclude * *.pyc # e.g. from running the unit tests
+

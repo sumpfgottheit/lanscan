@@ -9,14 +9,14 @@ def read(fname):
 
 setup(
     name='lanscan',
-    version='0.0.1'
+    version='0.0.1',
 
-    description='Python 3 module to collect information about the hosts and devices on the local network'
+    description='Python 3 module to collect information about the hosts and devices on the local network',
     long_description=read("README.rst"),
     keywords='network scanner active passive dpkt html',
 
     # The project's main homepage.
-    url='https://github.com/sumpfgottheit/lanscan'
+    url='https://github.com/sumpfgottheit/lanscan',
 
     # Author details
     author='Florian Sachs',

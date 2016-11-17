@@ -9,10 +9,13 @@ os.environ['PATH'] = os.environ['PATH'] + ':/usr/sbin:/sbin'
 
 import subprocess
 import logging
+import nmap
 import scapy.config
 import scapy.layers.l2
 import scapy.route
+import texttable
 import socket
+from queue import Queue
 import math
 import sys
 import re
@@ -21,49 +24,26 @@ import errno
 import click
 from os.path import realpath, basename, isdir
 import netifaces
+import requests
+import threading
 
 logging.basicConfig(format='%(asctime)s %(levelname)-5s %(message)s', datefmt='%Y-%m-%d %H:%M:%S', level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+
+NMAP_SCANNER = nmap.PortScanner()
+
 
 def exit_n(message, exitcode=1):
     click.echo("{} {}".format(click.style('Failed', fg='red'), message), err=True)
     sys.exit(exitcode)
 
-def long2net(arg):
-    if (arg <= 0 or arg >= 0xFFFFFFFF):
-        raise ValueError("illegal netmask value", hex(arg))
-    return 32 - int(round(math.log(0xFFFFFFFF - arg, 2)))
 
-
-def to_CIDR_notation(bytes_network, bytes_netmask):
-    network = scapy.utils.ltoa(bytes_network)
-    netmask = long2net(bytes_netmask)
-    net = "%s/%s" % (network, netmask)
-    if netmask < 16:
-        logger.warn("%s is too big. skipping" % net)
-        return None
-
-    return net
-
-
-def scan_and_print_neighbors(net, interface, timeout=1):
-    logger.info("arping %s on %s" % (net, interface))
+def get_vendor(mac):
     try:
-        ans, unans = scapy.layers.l2.arping(net, iface=interface, timeout=timeout, verbose=True)
-        for s, r in ans.res:
-            line = r.sprintf("%Ether.src%  %ARP.psrc%")
-            try:
-                hostname = socket.gethostbyaddr(r.psrc)
-                line += " " + hostname[0]
-            except socket.herror:
-                # failed to resolve
-                pass
-            logger.info(line)
-    except socket.error as e:
-        if e.errno == errno.EPERM:  # Operation not permitted
-            logger.error("%s. Did you run as root?", e.strerror)
-        else:
-            raise
+        return requests.get('http://www.macvendorlookup.com/api/v2/' + mac).json()[0]['company']
+    except Exception as e:
+        logger.error(e)
+        return ""
 
 
 def get_driver(name):
@@ -73,7 +53,8 @@ def get_driver(name):
             return ''
         else:
             return d
-    except Exception:
+    except Exception as e:
+        logger.error(e)
         return ''
 
 
@@ -83,8 +64,85 @@ def get_hardware(driver):
     try:
         r = subprocess.check_output(['modinfo', driver]).decode('utf-8')
         return re.search(r'^description:\s*(.*)', r, re.M).groups()[0]
-    except Exception:
+    except Exception as e:
+        logger.error(e)
         return ''
+
+
+def get_all_vendors(macs):
+    input_queue = Queue()
+    result_hash = {}
+    logger.debug("Get all vendor informations")
+
+    class GetVendorThread(threading.Thread):
+        def __init__(self, input_queue, result_hash):
+            super().__init__()
+            self.input_queue = input_queue
+            self.result_hash = result_hash
+
+        def run(self):
+            while True:
+                mac = self.input_queue.get()
+                vendor = get_vendor(mac)
+                self.result_hash[mac] = vendor
+                self.input_queue.task_done()
+
+    # Start 20 Threads, all are waiting in run -> self.input_queue.get()
+    for i in range(20):
+        thread = GetVendorThread(input_queue, result_hash)
+        thread.setDaemon(True)
+        thread.start()
+
+    # Fill the input queue
+    for mac in macs:
+        input_queue.put(mac)
+
+    input_queue.join()
+    return result_hash
+
+
+def get_open_ports(ip):
+    result = {}
+    scan = NMAP_SCANNER.scan(hosts=ip, arguments='-sT')
+    try:
+        tcp_ports = scan.get('scan')[ip]['tcp']
+        for port, extra in tcp_ports.items():
+            result[port] = extra['name']
+    except Exception:
+        pass
+    return result
+
+
+def get_all_open_ports(ips):
+    input_queue = Queue()
+    result_hash = {}
+    logger.debug("Get all port information")
+
+    class GetNmapThread(threading.Thread):
+        def __init__(self, input_queue, result_hash):
+            super().__init__()
+            self.input_queue = input_queue
+            self.result_hash = result_hash
+
+        def run(self):
+            while True:
+                ip = self.input_queue.get()
+                open_ports = get_open_ports(ip)
+                self.result_hash[ip] = open_ports
+                self.input_queue.task_done()
+
+    # Start 20 Threads, all are waiting in run -> self.input_queue.get()
+    for i in range(20):
+        thread = GetNmapThread(input_queue, result_hash)
+        thread.setDaemon(True)
+        thread.start()
+
+    # Fill the input queue
+    for ip in ips:
+        input_queue.put(ip)
+
+    input_queue.join()
+    return result_hash
 
 
 class Networks:
@@ -119,6 +177,7 @@ class Networks:
 
                     self.networks.append(
                         Network(interface_name, network_ip, netmask, prefix, driver, hardware, is_default_network))
+            self.networks.sort(key=lambda x: x.sort_value)
 
     @property
     def len(self):
@@ -135,11 +194,32 @@ class Networks:
         return self.networks[self.default_network_id]
 
     def get_network_for_netaddr_ip(self, netaddr_ip: netaddr.IPNetwork):
-        for network in self.networks:   # type: Network
+        for network in self.networks:  # type: Network
             if network.netaddr_ip == netaddr_ip:
                 return network
         else:
             raise KeyError("No local network for {} found.".format(str(netaddr_ip.cidr)))
+
+
+class Host:
+    def __init__(self, ip_address, mac_address):
+        self.ip = ip_address
+        self.mac = mac_address
+        self.sort_value = netaddr.IPAddress(self.ip).value
+        try:
+            self.hostname = socket.gethostbyaddr(self.ip)[0]
+        except socket.herror:
+            # failed to resolve
+            self.hostname = ''
+        self.vendor = ''
+        self.open_ports = {}
+
+    @property
+    def open_port_numbers(self):
+        return sorted(list(self.open_ports.keys()))
+
+    def __repr__(self):
+        return "<IP:{s.ip}, Mac:{s.mac}, Name:{s.hostname}, Vendor:{s.vendor}, OpenPorts:{s.open_port_numbers}>".format(s=self)
 
 
 class Network:
@@ -153,86 +233,57 @@ class Network:
         self.is_default_network = is_default_network
         self.sort_value = netaddr.IPAddress(self.network_ip).value
         self.netaddr_ip = netaddr.IPNetwork("{}/{}".format(self.network_ip, self.netmask))
+        self.neighbours = []
+
+    def print_neighbours(self):
+        for host in self.neighbours:
+            print(host)
 
     @property
     def cidr(self):
         return str(self.netaddr_ip.cidr)
+
+    def scan(self, get_vendor, do_portscan, timeout=1):
+        try:
+            ans, unans = scapy.layers.l2.arping(self.cidr, iface=self.interface_name, timeout=timeout, verbose=False)
+            for s, r in ans.res:
+                self.neighbours.append(Host(r.psrc, r.src))
+        except socket.error as e:
+            if e.errno == errno.EPERM:  # Operation not permitted
+                message = ("Error: {}\n"
+                           "Run as root or - better - set the necessary capabilities for the python interpreter used and tcpdump.\n"
+                           "Example: setcap cap_net_raw=eip /usr/bin/python3\n"
+                           "Example: setcap cap_net_raw=eip $(which tcpdump)\n"
+                           "You may need to install the libcap-progs (openSuse) package").format(e.strerror)
+                exit_n(message, 2)
+            else:
+                raise
+
+        self.neighbours.sort(key=lambda x: x.sort_value)
+        if get_vendor:
+            self.set_vendor_in_neighbours()
+        if do_portscan:
+            self.set_open_ports_in_neigbours()
+
+    def set_vendor_in_neighbours(self):
+        macs = [host.mac for host in self.neighbours]
+        h = get_all_vendors(macs)
+        for host in self.neighbours:  # type: Host
+            if host.mac in h:
+                host.vendor = h[host.mac]
+
+    def set_open_ports_in_neigbours(self):
+        ips = [host.ip for host in self.neighbours]
+        h = get_all_open_ports(ips)
+        for host in self.neighbours:  # type: Host
+            if host.ip in h:
+                host.open_ports = h[host.ip]
 
     def __repr__(self):
         return ("<Network:{s.network_ip}, Netmask:{s.netmask}, Prefix:{s.prefix}, "
                 "Default:{s.is_default_network}, Interface_Name:{s.interface_name}, "
                 "Driver:{s.driver}, Hardware:{s.hardware}, "
                 "sort_value:{s.sort_value}>").format(s=self)
-
-
-class Interface():
-    @classmethod
-    def get_driver(cls, name):
-        try:
-            d = basename(realpath('/sys/class/net/{}/device/driver'.format(name)))
-            if d == 'driver':
-                return ''
-            else:
-                return d
-        except Exception:
-            return ''
-
-    @classmethod
-    def get_hardware(cls, driver):
-        if driver == '':
-            return ''
-        try:
-            r = subprocess.check_output(['modinfo', driver]).decode('utf-8')
-            return re.search(r'^description:\s*(.*)', r, re.M).groups()[0]
-        except Exception:
-            return ''
-
-    def __init__(self, name, i):
-        self.i = i[netifaces.AF_INET]
-        self.name = name
-        self.driver = Interface.get_driver(name)
-        self.hardware = Interface.get_hardware(self.driver)
-
-    def __repr__(self):
-        return "<Name:{s.name},Driver:{s.driver},Hardware:{s.hardware},i:{s.i}".format(s=self)
-
-
-class Route:
-    def __init__(self, net, mask, gw, iface, addr):
-        if mask == 0:
-            self.mask = '0.0.0.0'
-        else:
-            self.mask = long2net(mask)
-        self.net = scapy.utils.ltoa(net)
-        self.gw = gw
-        self.iface = iface
-        self.addr = addr
-        self.is_default = False
-
-    def __repr__(self):
-        return "<Net:{s.net},Mask:{s.mask},GW:{s.gw},Iface:{s.iface},Addr:{s.addr},Default:{s.is_default}".format(
-            s=self)
-
-
-def routes():
-    """
-    Return the list of current routes of the machine
-    :return: list of Route()
-    """
-    default_route = None
-    routes = []
-    for route in scapy.config.conf.route.routes:
-        route = Route(*route)
-        if route.net == '0.0.0.0':
-            default_route = route
-            continue
-        if route.iface == 'lo':
-            continue
-        routes.append(route)
-    for route in routes:  # type: Route
-        if route.iface == default_route.iface and route.addr == default_route.addr:
-            route.is_default = True
-    return routes
 
 
 @click.group('main')
@@ -254,10 +305,12 @@ def networks(o):
 @main.command('scan', help='Scan a network, defaults to default network.')
 @click.option('--network', '-n', 'arg_network', required=False,
               help="The network to scan in CIDR notation or the network number from 'lanscan networks'")
+@click.option('--vendor/--no-vendor', default=True, help="Vendor lookup based on Mac addres. Requires internet connection.")
+@click.option('--portscan/--no-portscan', default=True, help="Let nmap do a simple connect-portscan.")
 @click.pass_obj
-def scan(o, arg_network):
-    networks = o['networks']    # type: Networks
-    n = None
+def scan(o, arg_network, vendor, portscan):
+    networks = o['networks']  # type: Networks
+    n = None  # type: Network
     if arg_network is None:
         n = networks.default_network
     else:
@@ -275,5 +328,13 @@ def scan(o, arg_network):
             except (KeyError, netaddr.AddrFormatError) as e:
                 exit_n(str(e))
 
-    click.echo("Network: {}".format(n.cidr))
-
+    logger.debug("Network: {}".format(n.cidr))
+    n.scan(vendor, portscan)
+    header = ['ip', 'mac', 'vendor', 'open ports']
+    content = [(host.ip, host.mac, host.vendor, ", ".join(map(str, host.open_port_numbers))) for host in n.neighbours]
+    width, height = click.get_terminal_size()
+    table = texttable.Texttable(max_width=width)
+    table.set_deco(table.HEADER)
+    table.header(header)
+    table.add_rows(content, header=False)
+    print(table.draw())

@@ -330,8 +330,8 @@ def scan(o, arg_network, vendor, portscan):
 
     logger.debug("Network: {}".format(n.cidr))
     n.scan(vendor, portscan)
-    header = ['ip', 'mac', 'vendor', 'open ports']
-    content = [(host.ip, host.mac, host.vendor, ", ".join(map(str, host.open_port_numbers))) for host in n.neighbours]
+    header = ['ip', 'name', 'mac', 'vendor', 'open ports']
+    content = [(host.ip, host.hostname, host.mac, host.vendor, ", ".join(map(str, host.open_port_numbers))) for host in n.neighbours]
     width, height = click.get_terminal_size()
     table = texttable.Texttable(max_width=width)
     table.set_deco(table.HEADER)

@@ -9,6 +9,7 @@ os.environ['PATH'] = os.environ['PATH'] + ':/usr/sbin:/sbin'
 
 import subprocess
 import logging
+import logging.config
 import nmap
 import scapy.config
 import scapy.layers.l2
@@ -22,15 +23,37 @@ import re
 import netaddr
 import errno
 import click
-from os.path import realpath, basename, isdir
+from os.path import realpath, basename, isdir, isfile
 import netifaces
 import requests
 import threading
+import yaml
+from appdirs import AppDirs
+import json
 
-logging.basicConfig(format='%(asctime)s %(levelname)-5s %(message)s', datefmt='%Y-%m-%d %H:%M:%S', level=logging.DEBUG)
+APP_NAME     ='lanscan'
+APPDIRS      = AppDirs(APP_NAME)
+LOGFILE      = os.path.join(APPDIRS.user_log_dir, 'lanscan.log')
+VENDOR_CACHE = os.path.join(APPDIRS.user_cache_dir, 'vendors')
+NMAP_SCANNER = nmap.PortScanner()
+
+#logging.basicConfig(format='%(asctime)s %(levelname)-5s %(message)s', datefmt='%Y-%m-%d %H:%M:%S', level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-NMAP_SCANNER = nmap.PortScanner()
+def initialize_directories():
+    if not isdir(APPDIRS.user_cache_dir):
+        os.makedirs(APPDIRS.user_cache_dir, mode=0o755, exist_ok=True)
+    if not isdir(APPDIRS.user_log_dir):
+        os.makedirs(APPDIRS.user_log_dir, mode=0o755, exist_ok=True)
+
+def configure_logger(debug_to_stdout):
+    filename = os.path.join(os.path.dirname(__file__), 'logging.yaml')
+    with open(filename) as fp:
+        config_dict = yaml.load(fp)
+    config_dict['handlers']['logfile']['filename'] = LOGFILE
+    if debug_to_stdout:
+        config_dict['handlers']['console']['level'] = logging.DEBUG
+    logging.config.dictConfig(config_dict)
 
 
 def exit_n(message, exitcode=1):
@@ -40,7 +63,8 @@ def exit_n(message, exitcode=1):
 
 def get_vendor(mac):
     try:
-        return requests.get('http://www.macvendorlookup.com/api/v2/' + mac).json()[0]['company']
+        url = 'http://www.macvendorlookup.com/api/v2/' + mac
+        return requests.get(url).json()[0]['company']
     except Exception as e:
         logger.error(e)
         return ""
@@ -62,8 +86,11 @@ def get_hardware(driver):
     if driver == '':
         return ''
     try:
+        logger.debug("Call: modinfo {}".format(driver))
         r = subprocess.check_output(['modinfo', driver]).decode('utf-8')
-        return re.search(r'^description:\s*(.*)', r, re.M).groups()[0]
+        hardware = re.search(r'^description:\s*(.*)', r, re.M).groups()[0]
+        logger.debug("Hardware for %s is %s", driver, hardware)
+        return hardware
     except Exception as e:
         logger.error(e)
         return ''
@@ -72,7 +99,14 @@ def get_hardware(driver):
 def get_all_vendors(macs):
     input_queue = Queue()
     result_hash = {}
+    cache = {}
     logger.debug("Get all vendor informations")
+    if isfile(VENDOR_CACHE):
+        try:
+            cache = json.load(open(VENDOR_CACHE))
+            logger.debug("Vendor cachefile %s loaded", VENDOR_CACHE)
+        except Exception:
+            cache = {}
 
     class GetVendorThread(threading.Thread):
         def __init__(self, input_queue, result_hash):
@@ -83,7 +117,12 @@ def get_all_vendors(macs):
         def run(self):
             while True:
                 mac = self.input_queue.get()
-                vendor = get_vendor(mac)
+                if mac in cache:
+                    vendor = cache[mac]
+                    logger.debug("CacheHit: mac=%s, vendor=%s", mac, vendor)
+                else:
+                    vendor = get_vendor(mac)
+                    logger.debug("CacheMiss - Queried: mac=%s, vendor=%s", mac, vendor)
                 self.result_hash[mac] = vendor
                 self.input_queue.task_done()
 
@@ -98,6 +137,8 @@ def get_all_vendors(macs):
         input_queue.put(mac)
 
     input_queue.join()
+    cache.update(result_hash)
+    json.dump(cache, open(VENDOR_CACHE, 'w'), indent=2)
     return result_hash
 
 
@@ -254,7 +295,7 @@ class Network:
                            "Run as root or - better - set the necessary capabilities for the python interpreter used and tcpdump.\n"
                            "Example: setcap cap_net_raw=eip /usr/bin/python3\n"
                            "Example: setcap cap_net_raw=eip $(which tcpdump)\n"
-                           "You may need to install the libcap-progs (openSuse) package").format(e.strerror)
+                           "You may need to install the libcap-progs package").format(e.strerror)
                 exit_n(message, 2)
             else:
                 raise
@@ -287,8 +328,11 @@ class Network:
 
 
 @click.group('main')
+@click.option('-d', 'debug', is_flag=True, default=False, help="Print debug messages to stdout.")
 @click.pass_context
-def main(ctx):
+def main(ctx, debug):
+    initialize_directories()
+    configure_logger(debug)
     networks = Networks()
     networks.initialize()
     ctx.obj = {'networks': networks}

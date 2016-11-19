@@ -4,8 +4,29 @@ setcap cap_net_raw=eip /usr/bin/tcpdump
 """
 
 import os
+import click
+import sys
 
 os.environ['PATH'] = os.environ['PATH'] + ':/usr/sbin:/sbin'
+
+
+def exit_n(message, exitcode=1):
+    click.echo("{} {}".format(click.style('Failed', fg='red'), message), err=True)
+    sys.exit(exitcode)
+
+
+import shutil
+
+for progs in ('nmap', 'tcpdump'):
+    all_found = True
+    if shutil.which('tcpdump') is None:
+        print("tcpdump is not found in the path. Please install it.")
+        all_found = False
+    if shutil.which('nmap') is None:
+        print("nmap is not found in the path. Please install it.")
+        all_found = False
+    if not all_found:
+        exit_n("The necessary programs are not available.")
 
 import subprocess
 import logging
@@ -17,12 +38,9 @@ import scapy.route
 import texttable
 import socket
 from queue import Queue
-import math
-import sys
 import re
 import netaddr
 import errno
-import click
 from os.path import realpath, basename, isdir, isfile
 import netifaces
 import requests
@@ -31,20 +49,23 @@ import yaml
 from appdirs import AppDirs
 import json
 
-APP_NAME     ='lanscan'
-APPDIRS      = AppDirs(APP_NAME)
-LOGFILE      = os.path.join(APPDIRS.user_log_dir, 'lanscan.log')
+APP_NAME = 'lanscan'
+APPDIRS = AppDirs(APP_NAME)
+LOGFILE = os.path.join(APPDIRS.user_log_dir, 'lanscan.log')
 VENDOR_CACHE = os.path.join(APPDIRS.user_cache_dir, 'vendors')
+
 NMAP_SCANNER = nmap.PortScanner()
 
-#logging.basicConfig(format='%(asctime)s %(levelname)-5s %(message)s', datefmt='%Y-%m-%d %H:%M:%S', level=logging.DEBUG)
+# logging.basicConfig(format='%(asctime)s %(levelname)-5s %(message)s', datefmt='%Y-%m-%d %H:%M:%S', level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+
 
 def initialize_directories():
     if not isdir(APPDIRS.user_cache_dir):
         os.makedirs(APPDIRS.user_cache_dir, mode=0o755, exist_ok=True)
     if not isdir(APPDIRS.user_log_dir):
         os.makedirs(APPDIRS.user_log_dir, mode=0o755, exist_ok=True)
+
 
 def configure_logger(debug_to_stdout):
     filename = os.path.join(os.path.dirname(__file__), 'logging.yaml')
@@ -56,17 +77,12 @@ def configure_logger(debug_to_stdout):
     logging.config.dictConfig(config_dict)
 
 
-def exit_n(message, exitcode=1):
-    click.echo("{} {}".format(click.style('Failed', fg='red'), message), err=True)
-    sys.exit(exitcode)
-
-
 def get_vendor(mac):
     try:
         url = 'http://www.macvendorlookup.com/api/v2/' + mac
         return requests.get(url).json()[0]['company']
     except Exception as e:
-        logger.error(e)
+        logger.warn(e)
         return ""
 
 
@@ -241,6 +257,17 @@ class Networks:
         else:
             raise KeyError("No local network for {} found.".format(str(netaddr_ip.cidr)))
 
+    @property
+    def interfaces(self):
+        _interfaces = {}
+        for network in self.networks:  # type: Network
+            if network.interface_name not in _interfaces:
+                _interfaces[network.interface_name] = {'driver': network.driver, 'hardware': network.hardware,
+                                                       'name': network.interface_name}
+        interfaces = list(_interfaces.values())  # type: list
+        interfaces.sort(key=lambda x: x['name'])
+        return interfaces
+
 
 class Host:
     def __init__(self, ip_address, mac_address):
@@ -260,7 +287,8 @@ class Host:
         return sorted(list(self.open_ports.keys()))
 
     def __repr__(self):
-        return "<IP:{s.ip}, Mac:{s.mac}, Name:{s.hostname}, Vendor:{s.vendor}, OpenPorts:{s.open_port_numbers}>".format(s=self)
+        return "<IP:{s.ip}, Mac:{s.mac}, Name:{s.hostname}, Vendor:{s.vendor}, OpenPorts:{s.open_port_numbers}>".format(
+            s=self)
 
 
 class Network:
@@ -341,15 +369,40 @@ def main(ctx, debug):
 @main.command('networks', help='Display a list of available networks.')
 @click.pass_obj
 def networks(o):
+    content = []
     for i, network in enumerate(o['networks'].networks, start=1):  # type: Network
         first = '*' if network.is_default_network else ' '
-        print("{}: {} {}/{} on {}".format(i, first, network.network_ip, network.prefix, network.interface_name))
+        content.append((i, first, network.netaddr_ip.cidr, network.interface_name))
+    header = ['#', 'default', 'cidr', 'interface']
+    width, height = click.get_terminal_size()
+    table = texttable.Texttable(max_width=width)
+    table.set_deco(table.HEADER)
+    table.header(header)
+    table.add_rows(content, header=False)
+    print(table.draw())
+
+
+@main.command('interfaces', help='Display a list available interfaces')
+@click.pass_obj
+def interfaces(o):
+    networks = o['networks']  # type: Networks
+    content = []
+    for i, interface in enumerate(networks.interfaces, start=1):
+        content.append((i, interface['name'], interface['driver'], interface['hardware']))
+    header = ['#', 'interface', 'driver', 'hardware']
+    width, height = click.get_terminal_size()
+    table = texttable.Texttable(max_width=width)
+    table.set_deco(table.HEADER)
+    table.header(header)
+    table.add_rows(content, header=False)
+    print(table.draw())
 
 
 @main.command('scan', help='Scan a network, defaults to default network.')
 @click.option('--network', '-n', 'arg_network', required=False,
               help="The network to scan in CIDR notation or the network number from 'lanscan networks'")
-@click.option('--vendor/--no-vendor', default=True, help="Vendor lookup based on Mac addres. Requires internet connection.")
+@click.option('--vendor/--no-vendor', default=True,
+              help="Vendor lookup based on Mac addres. Requires internet connection.")
 @click.option('--portscan/--no-portscan', default=True, help="Let nmap do a simple connect-portscan.")
 @click.pass_obj
 def scan(o, arg_network, vendor, portscan):
@@ -375,7 +428,8 @@ def scan(o, arg_network, vendor, portscan):
     logger.debug("Network: {}".format(n.cidr))
     n.scan(vendor, portscan)
     header = ['ip', 'name', 'mac', 'vendor', 'open ports']
-    content = [(host.ip, host.hostname, host.mac, host.vendor, ", ".join(map(str, host.open_port_numbers))) for host in n.neighbours]
+    content = [(host.ip, host.hostname, host.mac, host.vendor, ", ".join(map(str, host.open_port_numbers))) for host in
+               n.neighbours]
     width, height = click.get_terminal_size()
     table = texttable.Texttable(max_width=width)
     table.set_deco(table.HEADER)

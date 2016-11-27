@@ -81,7 +81,7 @@ def ping(ip):
     """
     Returns True if host responds to a ping request
     """
-    return os.system("ping -c 1 " + ip) == 0
+    return os.system("ping -c 1 " + ip + " >/dev/null") == 0
 
 
 def get_vendor(mac):
@@ -89,7 +89,7 @@ def get_vendor(mac):
         url = 'http://www.macvendorlookup.com/api/v2/' + mac
         return requests.get(url).json()[0]['company']
     except Exception as e:
-        logger.warn(e)
+        logger.warning(e)
         return ""
 
 

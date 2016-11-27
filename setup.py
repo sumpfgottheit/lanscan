@@ -11,8 +11,8 @@ setup(
     name='lanscan',
     version='0.0.1',
 
-    description='Python 3 module to collect information about the hosts and devices on the local network',
-    long_description=read("README.rst"),
+    description='Python 3 module to collect and display information about the hosts and devices on the local network',
+    long_description=read("README.md"),
     keywords='network scanner active passive dpkt html',
 
     # The project's main homepage.
@@ -31,7 +31,7 @@ setup(
         #   3 - Alpha
         #   4 - Beta
         #   5 - Production/Stable
-        'Development Status :: 3 - Alpha',
+        'Development Status :: 4 - Beta',
 
         # Indicate who your project is intended for
         #'Intended Audience :: Developers',
@@ -42,11 +42,6 @@ setup(
 
         # Specify the Python versions you support here. In particular, ensure
         # that you indicate whether you support Python 2, Python 3 or both.
-        #'Programming Language :: Python :: 2.7',
-        #'Programming Language :: Python :: 3',
-        #'Programming Language :: Python :: 3.2',
-        #'Programming Language :: Python :: 3.3',
-        # 'Programming Language :: Python :: 3.4',
         'Programming Language :: Python :: 3.5',
 
         # Operating systems this runs on

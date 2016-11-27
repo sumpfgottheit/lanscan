@@ -1,7 +1,7 @@
 lanscan
 =======
 
-::
+do::
 
      # lanscan  scan
           ip                    name                     mac          alive                vendor                                        open ports
@@ -17,7 +17,7 @@ network. It also gives information about present network interfaces and
 networks. ``lanscan`` uses the ``nmap``, ``tcpdump`` and ``ping``
 commands.
 
-::
+lanscan has a usage included::
 
     $ lanscan
     Usage: lanscan [OPTIONS] COMMAND [ARGS]...
@@ -34,7 +34,7 @@ commands.
 Show interfaces
 ---------------
 
-::
+A list of all current interfaces::
 
     $ lanscan interfaces
     #      interface      driver                         hardware
@@ -48,7 +48,7 @@ Show interfaces
 Show local networks
 -------------------
 
-::
+A list of all local networks::
 
     $ lanscan networks
     #   default        cidr            interface
@@ -61,9 +61,7 @@ Show local networks
 Scan a local network
 --------------------
 
-The ``lanscan scan`` command has a few parameters:
-
-::
+The ``lanscan scan`` command has a few parameters::
 
     $ lanscan scan --help
     Usage: lanscan scan [OPTIONS]
@@ -78,9 +76,7 @@ The ``lanscan scan`` command has a few parameters:
       --portscan / --no-portscan  Let nmap do a simple connect-portscan.
       --help                      Show this message and exit.
 
-Let's scan the default network:
-
-::
+Let's scan the default network::
 
      # lanscan  scan
           ip                    name                     mac          alive                vendor                                        open ports
@@ -99,13 +95,12 @@ I don't think, that it will work on Windows or OS X.
 
 Create a virtualenv and call ``pip install lanscan``. The requirements
 will automatically be installed within your virtualen. To make calling
-easier, create the file ``/usr/local/bin/lanscan`` with
-
-::
+easier, create the file ``/usr/local/bin/lanscan`` with::
 
      #!/bin/bash
      source ${PATH_TO_YOUR_VIRTUALENV}/bin/activate
      lanscan $@
 
 The github repository can be found at
+
 https://github.com/sumpfgottheit/lanscan

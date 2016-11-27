@@ -9,7 +9,7 @@ def read(fname):
 
 setup(
     name='lanscan',
-    version='0.0.1',
+    version='0.0.2',
 
     description='Python 3 module to collect and display information about the hosts and devices on the local network',
     long_description=read("README.md"),

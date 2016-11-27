@@ -9,7 +9,7 @@ def read(fname):
 
 setup(
     name='lanscan',
-    version='0.0.4',
+    version='0.9.0',
 
     description='Python 3 module to collect and display information about the hosts and devices on the local network',
     long_description=read("README.rst"),
@@ -46,13 +46,11 @@ setup(
 
         # Operating systems this runs on
         'Operating System :: Unix',
-        'Operating System :: MacOS :: MacOS X',
-        'Operating System :: POSIX',
 
         # what does this do?
         'Topic :: Utilities',
 #        'Topic :: System :: Shells',
-#        'Environment :: Console'
+        'Environment :: Console'
     ],
 
     packages=['lanscan'],

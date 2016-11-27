@@ -101,6 +101,19 @@ easier, create the file ``/usr/local/bin/lanscan`` with::
      source ${PATH_TO_YOUR_VIRTUALENV}/bin/activate
      lanscan $@
 
+
+Necessary permissions
+---------------------
+
+``lanscan`` needs special permissions, to be able to open a raw socket. You may run it as root - not recommended - or you set the necessary capabilities (man 7 capabilities). 
+The capability needed is ``cap_net_raw=eip`` and this needs to be set on the python interpreter used and the ``tcpdump`` binary using ``setcap``. ``setcap`` cannot work on
+symlinks, so the real binary is needed. ``setcap`` needs to be run with superuser privileges::
+
+   setcap cap_net_raw=eip /path/to/virtualenv/bin/python3
+   setcap cap_net_raw=eip $(which tcpdump)
+
+You may need to install the necessary packages. On OpenSuse, the package is called ``libcap-progs``. On Arch, everything should be in place.
+
 The github repository can be found at
 
 https://github.com/sumpfgottheit/lanscan

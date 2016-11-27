@@ -1,7 +1,7 @@
 lanscan
 =======
 
-do::
+::
 
      # lanscan  scan
           ip                    name                     mac          alive                vendor                                        open ports
@@ -17,7 +17,7 @@ network. It also gives information about present network interfaces and
 networks. ``lanscan`` uses the ``nmap``, ``tcpdump`` and ``ping``
 commands.
 
-lanscan has a usage included::
+Usage::
 
     $ lanscan
     Usage: lanscan [OPTIONS] COMMAND [ARGS]...

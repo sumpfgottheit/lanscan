@@ -77,6 +77,13 @@ def configure_logger(debug_to_stdout):
     logging.config.dictConfig(config_dict)
 
 
+def ping(ip):
+    """
+    Returns True if host responds to a ping request
+    """
+    return os.system("ping -c 1 " + ip) == 0
+
+
 def get_vendor(mac):
     try:
         url = 'http://www.macvendorlookup.com/api/v2/' + mac
@@ -155,6 +162,41 @@ def get_all_vendors(macs):
     input_queue.join()
     cache.update(result_hash)
     json.dump(cache, open(VENDOR_CACHE, 'w'), indent=2)
+    return result_hash
+
+def ping_ips(ips):
+    input_queue = Queue()
+    result_hash = {}
+    logger.debug("Pinging IPs")
+
+    class PingHostThread(threading.Thread):
+        def __init__(self, input_queue, result_hash):
+            super().__init__()
+            self.input_queue = input_queue
+            self.result_hash = result_hash
+
+        def run(self):
+            while True:
+                _ip = self.input_queue.get()
+                is_alive = ping(_ip)
+                if is_alive:
+                    logger.debug("Host %s is alive" % _ip)
+                else:
+                    logger.debug("Host %s is not alive" % _ip)
+                self.result_hash[_ip] = is_alive
+                self.input_queue.task_done()
+
+    # Start 20 Threads, all are waiting in run -> self.input_queue.get()
+    for i in range(20):
+        thread = PingHostThread(input_queue, result_hash)
+        thread.setDaemon(True)
+        thread.start()
+
+    # Fill the input queue
+    for ip in ips:
+        input_queue.put(ip)
+
+    input_queue.join()
     return result_hash
 
 
@@ -280,6 +322,7 @@ class Host:
             # failed to resolve
             self.hostname = ''
         self.vendor = ''
+        self.is_alive = False
         self.open_ports = {}
 
     @property
@@ -287,7 +330,7 @@ class Host:
         return sorted(list(self.open_ports.keys()))
 
     def __repr__(self):
-        return "<IP:{s.ip}, Mac:{s.mac}, Name:{s.hostname}, Vendor:{s.vendor}, OpenPorts:{s.open_port_numbers}>".format(
+        return "<IP:{s.ip}, Mac:{s.mac}, Name:{s.hostname}, Vendor:{s.vendor}, is_alive:{s.is_alive}, OpenPorts:{s.open_port_numbers}>".format(
             s=self)
 
 
@@ -333,6 +376,7 @@ class Network:
             self.set_vendor_in_neighbours()
         if do_portscan:
             self.set_open_ports_in_neigbours()
+        self.set_is_alive_in_neigbours()
 
     def set_vendor_in_neighbours(self):
         macs = [host.mac for host in self.neighbours]
@@ -340,6 +384,12 @@ class Network:
         for host in self.neighbours:  # type: Host
             if host.mac in h:
                 host.vendor = h[host.mac]
+
+    def set_is_alive_in_neigbours(self):
+        ips = [host.ip for host in self.neighbours]
+        h = ping_ips(ips)
+        for host in self.neighbours:  # type: Host
+            host.is_alive = h.get(host.ip, False)
 
     def set_open_ports_in_neigbours(self):
         ips = [host.ip for host in self.neighbours]
@@ -427,8 +477,8 @@ def scan(o, arg_network, vendor, portscan):
 
     logger.debug("Network: {}".format(n.cidr))
     n.scan(vendor, portscan)
-    header = ['ip', 'name', 'mac', 'vendor', 'open ports']
-    content = [(host.ip, host.hostname, host.mac, host.vendor, ", ".join(map(str, host.open_port_numbers))) for host in
+    header = ['ip', 'name', 'mac', 'alive', 'vendor', 'open ports']
+    content = [(host.ip, host.hostname, host.mac, str(host.is_alive), host.vendor, ", ".join(map(str, host.open_port_numbers))) for host in
                n.neighbours]
     width, height = click.get_terminal_size()
     table = texttable.Texttable(max_width=width)

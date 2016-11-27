@@ -10,7 +10,7 @@ lanscan
     192.168.50.124   YotaPhone-1b4fe319cb0f71a1   28:c6:71:01:3a:6d   True    Yota Devices OY
 
 
-lanscan is a Python 3 module, that provides the `lanscan` console command. It scans a given local network and presents all devices on this network. It also gives information about present network interfaces and networks.
+`lanscan`  is a Python 3 module, that provides the `lanscan` console command. It scans a given local network and presents all devices on this network. It also gives information about present network interfaces and networks. `lanscan` uses the `nmap`, `tcpdump` and `ping` commands. 
 
     $ lanscan
     Usage: lanscan [OPTIONS] COMMAND [ARGS]...
@@ -79,5 +79,12 @@ Let's scan the default network:
 
 Installation
 ------------
-`lanscan` has been 
+`lanscan` has been written using Python 3.5, so the chances are good, that Python versions from 3.3 may work. It has been written on linux and I don't think, that it will work on Windows or OS X.
 
+Create a virtualenv and call `pip install lanscan`. The requirements will automatically be installed within your virtualen. To make calling easier, create the file `/usr/local/bin/lanscan` with 
+
+     #!/bin/bash
+     source ${PATH_TO_YOUR_VIRTUALENV}/bin/activate
+     lanscan $@
+
+The github repository can be found at https://github.com/sumpfgottheit/lanscan

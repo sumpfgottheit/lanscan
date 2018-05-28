@@ -86,6 +86,9 @@ Let's scan the default network::
     192.168.50.107   kindle-4bef0bcfc             74:c2:46:12:5b:01   True    Amazon Technologies Inc.           5000, 5555, 7000, 7100, 8008
     192.168.50.124   YotaPhone-1b4fe319cb0f71a1   28:c6:71:01:3a:6d   True    Yota Devices OY
 
+
+Mac vendor names are gracefully provided by MacVendors.co: https://macvendors.co/api
+
 Installation
 ------------
 
@@ -105,7 +108,7 @@ easier, create the file ``/usr/local/bin/lanscan`` with::
 Necessary permissions
 ---------------------
 
-``lanscan`` needs special permissions, to be able to open a raw socket. You may run it as root - not recommended - or you set the necessary capabilities (man 7 capabilities). 
+``lanscan`` needs special permissions, to be able to open a raw socket. You may run it as root - not recommended - or you set the necessary capabilities (man 7 capabilities).
 The capability needed is ``cap_net_raw=eip`` and this needs to be set on the python interpreter used and the ``tcpdump`` binary using ``setcap``. ``setcap`` cannot work on
 symlinks, so the real binary is needed. ``setcap`` needs to be run with superuser privileges::
 

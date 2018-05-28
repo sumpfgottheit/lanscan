@@ -86,8 +86,8 @@ def ping(ip):
 
 def get_vendor(mac):
     try:
-        url = 'http://www.macvendorlookup.com/api/v2/' + mac
-        return requests.get(url).json()[0]['company']
+        url = 'https://macvendors.co/api/' + mac
+        return requests.get(url).json()['result']['company']
     except Exception as e:
         logger.warning(e)
         return ""
